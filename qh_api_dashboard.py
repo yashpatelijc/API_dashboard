@@ -1159,12 +1159,18 @@ def _duckdb_add_missing_columns(con, table: str, df: pd.DataFrame):
             dtype = "TIMESTAMP"
         con.execute(f'ALTER TABLE {table} ADD COLUMN IF NOT EXISTS "{col}" {dtype};')
 
-def _duckdb_upsert_df(con, table: str, df: pd.DataFrame, key_cols: list):
+def _duckdb_upsert_df(con, table: str, df: pd.DataFrame, key_cols: list, *, strict: bool = False):
     if df is None or df.empty:
         return
     if "Date" in df.columns:
         df = df.drop(columns=["Date"])
+    original_len = len(df)
     df = df.drop_duplicates(subset=key_cols, keep='last').copy()
+    removed = original_len - len(df)
+    if removed > 0:
+        print(f"_duckdb_upsert_df: removed {removed} duplicate rows for table '{table}'")
+    if strict and (removed > 0 or df.duplicated(subset=key_cols).any()):
+        raise ValueError(f"Duplicate rows detected for table '{table}'")
     _duckdb_add_missing_columns(con, table, df)
     table_cols = _duckdb_table_columns(con, table)
     cols = [c for c in df.columns if c in table_cols]
