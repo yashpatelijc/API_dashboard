@@ -23,6 +23,5 @@ def load_duckdb_upsert():
 def test_duckdb_upsert_df_missing_key_raises_value_error():
     _duckdb_upsert_df = load_duckdb_upsert()
     df = pd.DataFrame({'a': [1, 2]})
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(ValueError, match="Missing key column\(s\) for dummy: b"):
         _duckdb_upsert_df(None, 'dummy', df, ['a', 'b'])
-    assert 'b' in str(excinfo.value)

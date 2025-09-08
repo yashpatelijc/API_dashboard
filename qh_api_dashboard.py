@@ -1160,13 +1160,16 @@ def _duckdb_add_missing_columns(con, table: str, df: pd.DataFrame):
         con.execute(f'ALTER TABLE {table} ADD COLUMN IF NOT EXISTS "{col}" {dtype};')
 
 def _duckdb_upsert_df(con, table: str, df: pd.DataFrame, key_cols: list):
-    if df is None or df.empty:
+    if df is None:
         return
     if "Date" in df.columns:
         df = df.drop(columns=["Date"])
-    missing = [k for k in key_cols if k not in df.columns]
+    missing = sorted(set(key_cols) - set(df.columns))
     if missing:
-        raise ValueError(f"Missing key column(s): {', '.join(missing)}")
+        missing_list = ", ".join(missing)
+        raise ValueError(f"Missing key column(s) for {table}: {missing_list}")
+    if df.empty:
+        return
     df = df.drop_duplicates(subset=key_cols, keep='last').copy()
     _duckdb_add_missing_columns(con, table, df)
     table_cols = _duckdb_table_columns(con, table)
