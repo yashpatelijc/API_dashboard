@@ -10,6 +10,7 @@ import time
 import uuid
 import shutil
 import hashlib
+import logging
 from collections import defaultdict, deque
 from datetime import date, datetime, timezone
 
@@ -23,6 +24,8 @@ from dateutil.relativedelta import relativedelta
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from multiprocessing import get_context
 from streamlit_autorefresh import st_autorefresh
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # 0) Page & CSS
@@ -1195,8 +1198,10 @@ def _duckdb_upsert_df(con, table: str, df: pd.DataFrame, key_cols: list, *, stri
         con.execute("DROP TABLE tmp_keys;")
         con.execute("COMMIT;")
     finally:
-        try: con.unregister("df_upsert")
-        except Exception: pass
+        try:
+            con.unregister("df_upsert")
+        except Exception:
+            logger.warning("unregister failed", exc_info=True)
 
 # Settings I/O
 def db_load_settings():
@@ -1207,13 +1212,16 @@ def db_load_settings():
     try:
         _duckdb_init(con)
         row = con.execute("SELECT settings_json FROM app_settings WHERE id=1;").fetchone()
-        if not row or not row[0]: return None
+        if not row or not row[0]:
+            return None
         return json.loads(row[0])
-    except Exception:
+    except (duckdb.Error, json.JSONDecodeError):
         return None
     finally:
-        try: con.close()
-        except Exception: pass
+        try:
+            con.close()
+        except Exception:
+            logger.warning("close failed", exc_info=True)
 
 def db_save_settings(cfg: dict):
     con = _duckdb_connect()
@@ -1224,8 +1232,10 @@ def db_save_settings(cfg: dict):
         df = pd.DataFrame([{**payload, "id": 1}])
         _duckdb_upsert_df(con, "app_settings", df, ["id"])
     finally:
-        try: con.close()
-        except Exception: pass
+        try:
+            con.close()
+        except Exception:
+            logger.warning("close failed", exc_info=True)
 
 # =============================================================================
 # 11) Settings UI
@@ -2049,8 +2059,10 @@ def _persist_scale_lookup(con):
         _duckdb_upsert_df(con, "scale_lookup", pd.DataFrame(rows), ["symbol","interval","calc_method"])
 
 def _analyze(con):
-    try: con.execute("PRAGMA analyze;")
-    except Exception: pass
+    try:
+        con.execute("PRAGMA analyze;")
+    except Exception:
+        logger.warning("analyze pragma failed", exc_info=True)
 
 def _export_parquet_mirror(con):
     """Windows-safe Parquet export: short partition columns (mkt, cm, itv) + proper timestamp column."""
@@ -2212,8 +2224,10 @@ def db_fetch_timeseries(symbol: str, interval: str, source: str) -> list:
     except Exception:
         return []
     finally:
-        try: con.close()
-        except Exception: pass
+        try:
+            con.close()
+        except Exception:
+            logger.warning("close failed", exc_info=True)
 
 def db_upsert_indicators_df(symbol: str, interval: str, source: str, df: pd.DataFrame):
     if df is None or df.empty: return
@@ -2240,8 +2254,10 @@ def db_upsert_indicators_df(symbol: str, interval: str, source: str, df: pd.Data
         _duckdb_init(con)
         _duckdb_upsert_df(con, "indicators", df2, ["symbol","interval","calc_method","time"])
     finally:
-        try: con.close()
-        except Exception: pass
+        try:
+            con.close()
+        except Exception:
+            logger.warning("close failed", exc_info=True)
 
 def _indicator_warmup_len(cfg: dict) -> int:
     s = cfg.get("indicator_sets", DEFAULT_INDICATOR_SETS)
@@ -2283,8 +2299,10 @@ def _eager_precompute_indicators():
             WHERE "interval" IN ('1D','1H','5M')
         """).df()
     finally:
-        try: con.close()
-        except Exception: pass
+        try:
+            con.close()
+        except Exception:
+            logger.warning("close failed", exc_info=True)
     if df_active is None or df_active.empty:
         return
     warmup = _indicator_warmup_len(cfg)
@@ -2457,8 +2475,10 @@ def _persist_timeseries_to_db():
         _export_parquet_mirror(con)
 
     finally:
-        try: con.close()
-        except Exception: pass
+        try:
+            con.close()
+        except Exception:
+            logger.warning("close failed", exc_info=True)
 
     # External DB snapshot
     _maybe_snapshot_db()
@@ -2493,8 +2513,10 @@ def db_fetch_timeseries_full(symbol: str, interval: str, source: str) -> pd.Data
     except Exception:
         return pd.DataFrame()
     finally:
-        try: con.close()
-        except Exception: pass
+        try:
+            con.close()
+        except Exception:
+            logger.warning("close failed", exc_info=True)
 
 @st.cache_data(ttl=600, show_spinner=False)
 def db_fetch_indicators_df(symbol: str, interval: str, source: str) -> pd.DataFrame:
@@ -2515,8 +2537,10 @@ def db_fetch_indicators_df(symbol: str, interval: str, source: str) -> pd.DataFr
     except Exception:
         return pd.DataFrame()
     finally:
-        try: con.close()
-        except Exception: pass
+        try:
+            con.close()
+        except Exception:
+            logger.warning("close failed", exc_info=True)
 
 def _prefer_db(): return bool(cfg.get("prefer_db_display", True))
 def _hard_lock(): return bool(cfg.get("db_hard_lock", True))
@@ -2533,8 +2557,10 @@ def _auto_source_for(sym: str, interval: str):
                 con.close()
                 if c_syn > 0: return "db_syn"
             except Exception:
-                try: con.close()
-                except Exception: pass
+                try:
+                    con.close()
+                except Exception:
+                    logger.warning("close failed", exc_info=True)
     if sym in st.session_state.trusted_api_series.get(interval, set()): return "api"
     if sym in st.session_state.trusted_syn_series.get(interval, set()): return "syn"
     return "api" if sym in st.session_state.series.get(interval, {}) else "syn"
@@ -2584,8 +2610,10 @@ def _status_ts_for_symbol(sym: str):
     except Exception:
         return None
     finally:
-        try: con.close()
-        except Exception: pass
+        try:
+            con.close()
+        except Exception:
+            logger.warning("close failed", exc_info=True)
 
 def _status_symbol(ts_ms: int):
     if ts_ms is None: return "⚪"
@@ -2746,9 +2774,11 @@ def _build_editor_table(symbols, filters: dict):
                     if row_api: api_1m_val, ts_api = float(row_api[0]), int(row_api[1])
                     if row_syn: syn_1m_val, ts_syn = float(row_syn[0]), int(row_syn[1])
                 except Exception:
-                    pass
-                try: con.close()
-                except Exception: pass
+                    logger.warning("latest value lookup failed", exc_info=True)
+                try:
+                    con.close()
+                except Exception:
+                    logger.warning("close failed", exc_info=True)
             stsym = _status_symbol(max([t for t in [ts_api, ts_syn] if t is not None], default=None))
             row = {
                 "Status": stsym,
@@ -3004,8 +3034,10 @@ def db_fetch_catalog() -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
     finally:
-        try: con.close()
-        except Exception: pass
+        try:
+            con.close()
+        except Exception:
+            logger.warning("close failed", exc_info=True)
 
 with main_tabs[2]:
     st.markdown("### Contracts Catalog (by Market / Pair)")
