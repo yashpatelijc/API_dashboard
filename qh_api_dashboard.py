@@ -1179,8 +1179,10 @@ def _duckdb_upsert_df(con, table: str, df: pd.DataFrame, key_cols: list):
     except Exception:
         con.execute("ROLLBACK;")
         con.execute("BEGIN;")
-        con.execute(f"CREATE TEMP TABLE tmp_upsert AS SELECT {col_list} FROM df_upsert;")
         key_cols_quoted = ", ".join(f'"{k}"' for k in key_cols)
+        con.execute(
+            f"CREATE TEMP TABLE tmp_upsert AS SELECT DISTINCT ON ({key_cols_quoted}) {col_list} FROM df_upsert;"
+        )
         con.execute(f"CREATE TEMP TABLE tmp_keys AS SELECT DISTINCT {key_cols_quoted} FROM tmp_upsert;")
         join_cond = " AND ".join([f't."{k}" = k."{k}"' for k in key_cols])
         con.execute(f'DELETE FROM {table} t USING tmp_keys k WHERE {join_cond};')
