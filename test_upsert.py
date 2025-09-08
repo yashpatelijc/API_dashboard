@@ -59,4 +59,4 @@ def test_duplicate_ids_do_not_raise(monkeypatch):
     failing_con = FailInsertConnection(con)
     _duckdb_upsert_df(failing_con, 't', df, ['id'])
     rows = con.execute('SELECT * FROM t').fetchall()
-    assert len(rows) == 1 and rows[0][0] == 1
+    assert rows == [(1, 20)]

@@ -1178,23 +1178,43 @@ def _duckdb_upsert_df(con, table: str, df: pd.DataFrame, key_cols: list):
         con.execute("COMMIT;")
     except Exception:
         con.execute("ROLLBACK;")
-        con.execute("BEGIN;")
         key_cols_quoted = ", ".join(f'"{k}"' for k in key_cols)
-        con.execute(
-            f"CREATE TEMP TABLE tmp_upsert AS SELECT DISTINCT ON ({key_cols_quoted}) {col_list} FROM df_upsert;"
+        non_key_cols = [c for c in cols if c not in key_cols]
+        update_clause = ", ".join(f'"{c}" = EXCLUDED."{c}"' for c in non_key_cols)
+        on_conflict_sql = (
+            f'INSERT INTO {table} ({col_list}) SELECT {col_list} FROM df_upsert '
+            f'ON CONFLICT ({key_cols_quoted}) '
+            + (f'DO UPDATE SET {update_clause}' if update_clause else 'DO NOTHING')
+            + ';'
         )
-        con.execute(f"CREATE TEMP TABLE tmp_keys AS SELECT DISTINCT {key_cols_quoted} FROM tmp_upsert;")
-        join_cond = " AND ".join([f't."{k}" = k."{k}"' for k in key_cols])
-        con.execute(f'DELETE FROM {table} t USING tmp_keys k WHERE {join_cond};')
-        con.execute(f'INSERT INTO {table} ({col_list}) SELECT {col_list} FROM tmp_upsert;')
-        con.execute("DROP TABLE tmp_upsert;")
-        con.execute("DROP TABLE tmp_keys;")
-        con.execute("COMMIT;")
+        try:
+            con.execute("BEGIN;")
+            con.execute(on_conflict_sql)
+            con.execute("COMMIT;")
+        except Exception:
+            con.execute("ROLLBACK;")
+            con.execute("BEGIN;")
+            con.execute(
+                f"CREATE TEMP TABLE tmp_upsert AS SELECT {col_list}, row_number() OVER () AS rn FROM df_upsert;"
+            )
+            con.execute(
+                f"CREATE TEMP TABLE tmp_upsert_dedup AS SELECT DISTINCT ON ({key_cols_quoted}) {col_list} "
+                f"FROM tmp_upsert ORDER BY {key_cols_quoted}, rn DESC;"
+            )
+            con.execute(f"CREATE TEMP TABLE tmp_keys AS SELECT DISTINCT {key_cols_quoted} FROM tmp_upsert_dedup;")
+            join_cond = " AND ".join([f't."{k}" = k."{k}"' for k in key_cols])
+            con.execute(f'DELETE FROM {table} t USING tmp_keys k WHERE {join_cond};')
+            con.execute(f'INSERT INTO {table} ({col_list}) SELECT {col_list} FROM tmp_upsert_dedup;')
+            con.execute("DROP TABLE tmp_upsert;")
+            con.execute("DROP TABLE tmp_upsert_dedup;")
+            con.execute("DROP TABLE tmp_keys;")
+            con.execute("COMMIT;")
     finally:
-        try: con.unregister("df_upsert")
-        except Exception: pass
+        try:
+            con.unregister("df_upsert")
+        except Exception:
+            pass
 
-# Settings I/O
 def db_load_settings():
     path = _duckdb_path()
     if not os.path.exists(path): return None
