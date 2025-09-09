@@ -1167,6 +1167,9 @@ def _duckdb_upsert_df(con, table: str, df: pd.DataFrame, key_cols: list, *, stri
         return
     if "Date" in df.columns:
         df = df.drop(columns=["Date"])
+    missing = [c for c in key_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing key columns: {', '.join(missing)}")
     original_len = len(df)
     df = df.drop_duplicates(subset=key_cols, keep='last').copy()
     removed = original_len - len(df)
