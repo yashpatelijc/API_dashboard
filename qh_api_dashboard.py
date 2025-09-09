@@ -1187,16 +1187,41 @@ def _duckdb_upsert_df(con, table: str, df: pd.DataFrame, key_cols: list, *, stri
         con.execute("COMMIT;")
     except Exception:
         con.execute("ROLLBACK;")
-        con.execute("BEGIN;")
-        con.execute(f"CREATE TEMP TABLE tmp_upsert AS SELECT {col_list} FROM df_upsert;")
         key_cols_quoted = ", ".join(f'"{k}"' for k in key_cols)
-        con.execute(f"CREATE TEMP TABLE tmp_keys AS SELECT DISTINCT {key_cols_quoted} FROM tmp_upsert;")
-        join_cond = " AND ".join([f't."{k}" = k."{k}"' for k in key_cols])
-        con.execute(f'DELETE FROM {table} t USING tmp_keys k WHERE {join_cond};')
-        con.execute(f'INSERT INTO {table} ({col_list}) SELECT {col_list} FROM tmp_upsert;')
-        con.execute("DROP TABLE tmp_upsert;")
-        con.execute("DROP TABLE tmp_keys;")
-        con.execute("COMMIT;")
+        non_key_cols = [c for c in cols if c not in key_cols]
+        update_expr = ", ".join(f'"{c}"=excluded."{c}"' for c in non_key_cols)
+        try:
+            con.execute("BEGIN;")
+            if update_expr:
+                con.execute(
+                    f'INSERT INTO {table} ({col_list}) SELECT {col_list} FROM df_upsert '
+                    f'ON CONFLICT ({key_cols_quoted}) DO UPDATE SET {update_expr};'
+                )
+            else:
+                con.execute(
+                    f'INSERT INTO {table} ({col_list}) SELECT {col_list} FROM df_upsert '
+                    f'ON CONFLICT ({key_cols_quoted}) DO NOTHING;'
+                )
+            con.execute("COMMIT;")
+        except Exception:
+            con.execute("ROLLBACK;")
+            con.execute("BEGIN;")
+            partition_cols = ", ".join(f'"{k}"' for k in key_cols)
+            con.execute(
+                f"CREATE TEMP TABLE tmp_upsert AS "
+                f"SELECT {col_list} FROM ("
+                f"SELECT {col_list}, ROW_NUMBER() OVER (PARTITION BY {partition_cols}) AS rn FROM df_upsert"
+                f") WHERE rn = 1;"
+            )
+            con.execute(
+                f"CREATE TEMP TABLE tmp_keys AS SELECT DISTINCT {key_cols_quoted} FROM tmp_upsert;"
+            )
+            join_cond = " AND ".join([f't."{k}" = k."{k}"' for k in key_cols])
+            con.execute(f'DELETE FROM {table} t USING tmp_keys k WHERE {join_cond};')
+            con.execute(f'INSERT INTO {table} ({col_list}) SELECT {col_list} FROM tmp_upsert;')
+            con.execute("DROP TABLE tmp_upsert;")
+            con.execute("DROP TABLE tmp_keys;")
+            con.execute("COMMIT;")
     finally:
         try:
             con.unregister("df_upsert")
