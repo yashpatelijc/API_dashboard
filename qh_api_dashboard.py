@@ -72,7 +72,16 @@ APP_VERSION = "2.2-db-hardened+eager-ind+schema-reset+short-parquet+new-indicato
 # =============================================================================
 # 1) Constants & Defaults
 # =============================================================================
-ALL_PRODUCT_CODES = ["SRA", "FF", "ER", "S1R", "SON", "FSR", "FER", "FERER", "S1RFF", "JTOA", "YBA", "NBB", "CRA"]
+ALL_PRODUCT_CODES = [
+    "FGBS", "FGBM", "FGBL", "FGBX", "FOAT", "FBTS", "FBTP", "FLG", "YTT", "YTC",
+    "TU", "FV", "TY", "AUL", "SRA", "FF", "ER", "SON", "FSR", "FER", "JTOA", "YBA", "NBB", "CRA", "S1RFF",
+    "FDAX", "FESX", "IND", "FSMI", "FSTB", "ES", "NQ", "RTY", "YM", "EMD",
+    "DX", "WDO", "EURCHF", "6Z", "SIR", "MNH", "ETH", "DC", "SF", "BP", "URO", "6N", "CD", "AD", "EURJPY", "EURGBP", "JY", "6M",
+    "HOCL", "CLCO", "RBHO", "GOCO", "RBCL", "HOGO", "MRBN", "NGUK", "CO", "GO", "NG", "RB", "HO", "CL",
+    "GC", "SI", "PL", "HG",
+    "BL", "ECN", "RS", "CRS", "SG", "FCPO", "CT", "LKC", "KC", "CC", "CN", "W", "KW", "SB", "BO", "SM", "ZR", "OTS",
+    "S1R", "FERER"
+]
 ALL_INTERMARKET_PAIRS = [
     ("SRA","FSR"), ("SRA","ER"), ("SRA","SON"), ("SRA","FER"), ("SRA","JTOA"), ("SRA","YBA"), ("SRA","NBB"), ("SRA","CRA"),
     ("FF","S1R"),
@@ -140,6 +149,7 @@ for k, v in {
     'trusted_api_1m': set(),
     'trusted_syn_1m': set(),
     'rate_calls': deque(),
+    'api_call_logs': deque(maxlen=100),
     'selection_signatures': {},
     'loaded_contracts': {'markets': {}, 'intermarket': {}},
     'symbol_meta': {},
@@ -193,6 +203,10 @@ if 'rate_limiter' not in st.session_state:
 
 def rate_limited_get(url: str, headers: dict, timeout: int):
     st.session_state.rate_limiter.wait()
+    st.session_state.api_call_logs.appendleft({
+        "time": datetime.now().strftime("%I:%M:%S %p"),
+        "url": url
+    })
     return requests.get(url, headers=headers, timeout=timeout)
 
 def get_month_codes(): return {1:'F', 2:'G', 3:'H', 4:'J', 5:'K', 6:'M', 7:'N', 8:'Q', 9:'U', 10:'V', 11:'X', 12:'Z'}
@@ -3102,5 +3116,13 @@ with main_tabs[3]:
                 done = int(rec.get("done", 0))
                 st.write(f"{itv}: {done}/{total}")
                 st.progress(min(1.0, done/total))
+    st.markdown("---")
+    st.markdown("### API Call Logs")
+    if st.session_state.api_call_logs:
+        df_logs = pd.DataFrame(list(st.session_state.api_call_logs))
+        st.dataframe(df_logs, use_container_width=True, height=300)
+    else:
+        st.caption("No API calls yet.")
+
     st.markdown("---")
     st.caption(f"Last update: {st.session_state.last_update}  •  App v{APP_VERSION}")
