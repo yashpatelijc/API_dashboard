@@ -1203,7 +1203,10 @@ def _duckdb_upsert_df(con, table: str, df: pd.DataFrame, key_cols: list, *, stri
         con.execute(f'INSERT OR REPLACE INTO {table} ({col_list}) SELECT {col_list} FROM df_upsert;')
         con.execute("COMMIT;")
     except Exception:
-        con.execute("ROLLBACK;")
+        try:
+            con.execute("ROLLBACK;")
+        except Exception:
+            pass
         key_cols_quoted = ", ".join(f'"{k}"' for k in key_cols)
         non_key_cols = [c for c in cols if c not in key_cols]
         update_expr = ", ".join(f'"{c}"=excluded."{c}"' for c in non_key_cols)
@@ -1221,7 +1224,10 @@ def _duckdb_upsert_df(con, table: str, df: pd.DataFrame, key_cols: list, *, stri
                 )
             con.execute("COMMIT;")
         except Exception:
-            con.execute("ROLLBACK;")
+            try:
+                con.execute("ROLLBACK;")
+            except Exception:
+                pass
             con.execute("BEGIN;")
             partition_cols = ", ".join(f'"{k}"' for k in key_cols)
             con.execute(
